@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -6,9 +7,28 @@ import '../../../core/constants.dart';
 import '../../../models/schedule_slot.dart';
 import '../../auth/auth_provider.dart';
 
+// ── Layout constants ──────────────────────────────────────────────────────────
+const double _kHourHeight = 64.0;          // px per hour
+const double _kPxPerMin   = _kHourHeight / 60.0;
+const double _kLabelWidth = 44.0;          // hour-label column width
+const int    _kTotalHours = 24;
+
+// ── Time helpers ──────────────────────────────────────────────────────────────
+int _minsFromMidnight(String t) {
+  final p = t.split(':');
+  return int.parse(p[0]) * 60 + int.parse(p[1]);
+}
+
+int _slotDurationMins(ScheduleSlot s) =>
+    _minsFromMidnight(s.endTime) - _minsFromMidnight(s.startTime);
+
+double _topForTime(String t)   => _minsFromMidnight(t) * _kPxPerMin;
+double _heightForSlot(ScheduleSlot s) =>
+    _slotDurationMins(s).clamp(15, 1440) * _kPxPerMin;
+
+// ═══════════════════════════════════════════════════════════════════════════════
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
-
   @override
   State<ScheduleScreen> createState() => _ScheduleScreenState();
 }
@@ -18,24 +38,26 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   bool _loading = true;
   String? _error;
 
-  // 0 = esta semana, 1 = semana que viene, 2 = en dos semanas
   int _weekOffset = 0;
   static const int _maxWeekOffset = 2;
-
-  // day_of_week per page index — DB uses 0=Mon, 1=Tue ... 6=Sun
-  static const _orderedDow = [0, 1, 2, 3, 4, 5, 6];
-
-  // Pages: pairs of days.
+  static const _orderedDow  = [0, 1, 2, 3, 4, 5, 6];
   static const _daysPerPage = 2;
-  static const _pageCount = 4; // 3 full pairs + Sun alone
+  static const _pageCount   = 4;
 
   late PageController _pageController;
+  late PageController _headerPageController;
   int _currentPage = 0;
 
-  /// Returns the 7 dates (Mon–Sun) for the currently selected week.
+  /// Shared vertical ScrollController (hour labels + day columns in sync)
+  final ScrollController _timeController = ScrollController();
+
+  Timer? _clockTimer;
+  DateTime _now = DateTime.now();
+
   List<DateTime> get _weekDates {
     final now = DateTime.now();
-    final monday = now.subtract(Duration(days: now.weekday - 1))
+    final monday = now
+        .subtract(Duration(days: now.weekday - 1))
         .add(Duration(days: _weekOffset * 7));
     final base = DateTime(monday.year, monday.month, monday.day);
     return List.generate(7, (i) => base.add(Duration(days: i)));
@@ -44,38 +66,62 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void initState() {
     super.initState();
-    // Start on today’s page (only relevant for the current week)
     final now = DateTime.now();
-    final todayDow = now.weekday; // 1=Mon..7=Sun
+    final todayDow    = now.weekday;
     final todayPageIdx = todayDow == 7 ? 3 : (todayDow - 1) ~/ 2;
     _currentPage = todayPageIdx;
-    _pageController = PageController(initialPage: todayPageIdx);
+    _pageController       = PageController(initialPage: todayPageIdx);
+    _headerPageController = PageController(initialPage: todayPageIdx);
+
+    // Sync header ↔ content page controllers
+    _pageController.addListener(() {
+      if (_headerPageController.hasClients &&
+          _headerPageController.page != _pageController.page) {
+        _headerPageController.jumpTo(_pageController.offset);
+      }
+    });
 
     _load();
+
+    // Scroll to current time on first paint
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToNow());
+
+    // Update now-line every minute
+    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() => _now = DateTime.now());
+    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _headerPageController.dispose();
+    _timeController.dispose();
+    _clockTimer?.cancel();
     super.dispose();
+  }
+
+  void _scrollToNow() {
+    if (!_timeController.hasClients) return;
+    final nowMins  = _now.hour * 60 + _now.minute;
+    final targetPx = (nowMins * _kPxPerMin - 100).clamp(0.0, _kTotalHours * _kHourHeight);
+    _timeController.animateTo(
+      targetPx,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
-      // Pass the Monday of the displayed week so the API computes
-      // next_date and my_reservation for the correct week.
-      final monday = _weekDates[0];
+      final monday    = _weekDates[0];
       final weekStart =
           '${monday.year}-${monday.month.toString().padLeft(2, '0')}-${monday.day.toString().padLeft(2, '0')}';
-      final data = await ApiClient.get(
-        '${AppConstants.schedulesUrl}?week_start=$weekStart',
-      );
+      final data    = await ApiClient.get('${AppConstants.schedulesUrl}?week_start=$weekStart');
       final rawSlots = data['slots'] as List<dynamic>? ?? [];
       setState(() {
-        _slots = rawSlots
-            .map((s) => ScheduleSlot.fromJson(s as Map<String, dynamic>))
-            .toList();
+        _slots   = rawSlots.map((s) => ScheduleSlot.fromJson(s as Map<String, dynamic>)).toList();
         _loading = false;
       });
     } catch (e) {
@@ -90,27 +136,25 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   String _shortDayLabel(int dayIndex) {
-    final date = _weekDates[dayIndex];
+    final date  = _weekDates[dayIndex];
     const names = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
     return '${names[dayIndex]} ${date.day}';
   }
 
   bool _isToday(int dayIndex) {
     final d = _weekDates[dayIndex];
-    final now = DateTime.now();
-    return d.year == now.year && d.month == now.month && d.day == now.day;
+    return d.year == _now.year && d.month == _now.month && d.day == _now.day;
   }
 
   void _changeWeek(int delta) {
     final next = (_weekOffset + delta).clamp(0, _maxWeekOffset);
     if (next == _weekOffset) return;
-    setState(() {
-      _weekOffset = next;
-      _currentPage = 0;
-    });
+    setState(() { _weekOffset = next; _currentPage = 0; });
     _pageController.dispose();
-    _pageController = PageController(initialPage: 0);
-    _load(); // re-fetch with the new week_start
+    _headerPageController.dispose();
+    _pageController       = PageController(initialPage: 0);
+    _headerPageController = PageController(initialPage: 0);
+    _load();
   }
 
   String _weekLabel() {
@@ -125,9 +169,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _SlotDetailSheet(
-        slot: slot,
-        date: _weekDates[dayIndex],
-        onDone: _load,
+        slot: slot, date: _weekDates[dayIndex], onDone: _load,
       ),
     );
   }
@@ -147,7 +189,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header ──────────────────────────────────────────────────
+            // ── Title ──────────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 22, 12, 0),
               child: Row(
@@ -155,11 +197,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   const Expanded(
                     child: Text(
                       'Grilla de clases',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFFF0F0F0),
-                      ),
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Color(0xFFF0F0F0)),
                     ),
                   ),
                   if (!_loading)
@@ -171,7 +209,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ),
             ),
 
-            // ── Week navigator ───────────────────────────────────────────
+            // ── Week navigator ─────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
               child: Row(
@@ -179,331 +217,420 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.chevron_left_rounded, size: 22),
-                    color: _weekOffset > 0
-                        ? const Color(0xFF00F5D4)
-                        : const Color(0xFF2A2A3A),
+                    color: _weekOffset > 0 ? const Color(0xFF00F5D4) : const Color(0xFF2A2A3A),
                     onPressed: _weekOffset > 0 ? () => _changeWeek(-1) : null,
                   ),
                   Text(
                     _weekLabel(),
                     style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: _weekOffset == 0
-                          ? const Color(0xFFAAAAAA)
-                          : const Color(0xFF00F5D4),
+                      fontSize: 13, fontWeight: FontWeight.w700,
+                      color: _weekOffset == 0 ? const Color(0xFFAAAAAA) : const Color(0xFF00F5D4),
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.chevron_right_rounded, size: 22),
-                    color: _weekOffset < _maxWeekOffset
-                        ? const Color(0xFF00F5D4)
-                        : const Color(0xFF2A2A3A),
+                    color: _weekOffset < _maxWeekOffset ? const Color(0xFF00F5D4) : const Color(0xFF2A2A3A),
                     onPressed: _weekOffset < _maxWeekOffset ? () => _changeWeek(1) : null,
                   ),
                 ],
               ),
             ),
 
-            // ── Page indicator dots ──────────────────────────────────────
-            if (!_loading && _error == null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: Row(
-                  children: [
-                    Text(
-                      _pageLabel(_currentPage),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF00F5D4),
-                      ),
-                    ),
-                    const Spacer(),
-                    Row(
-                      children: List.generate(_pageCount, (i) => AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        width: i == _currentPage ? 18 : 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(3),
-                          color: i == _currentPage
-                              ? const Color(0xFF00F5D4)
-                              : const Color(0xFF2A2A3A),
-                        ),
-                      )),
-                    ),
-                  ],
-                ),
-              ),
-
-            // ── Content ──────────────────────────────────────────────────
+            // ── Content ────────────────────────────────────────────────────
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator(color: Color(0xFF00F5D4)))
                   : _error != null
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.wifi_off_rounded, size: 40, color: Color(0xFF444444)),
-                              const SizedBox(height: 12),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 32),
-                                child: Text(_error!, textAlign: TextAlign.center,
-                                    style: const TextStyle(color: Color(0xFF888888), fontSize: 13)),
-                              ),
-                              const SizedBox(height: 16),
-                              TextButton(onPressed: _load, child: const Text('Reintentar')),
-                            ],
-                          ),
-                        )
-                      : PageView.builder(
-                          controller: _pageController,
-                          itemCount: _pageCount,
-                          onPageChanged: (p) => setState(() => _currentPage = p),
-                          itemBuilder: (_, page) {
-                            final d1 = page * _daysPerPage;
-                            final d2 = d1 + 1;
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: _DayColumn(
-                                    label: _shortDayLabel(d1),
-                                    isToday: _isToday(d1),
-                                    slots: _slotsForDayIndex(d1),
-                                    onTap: (s) => _openDetail(s, d1),
-                                  ),
-                                ),
-                                if (d2 < 7)
-                                  Expanded(
-                                    child: _DayColumn(
-                                      label: _shortDayLabel(d2),
-                                      isToday: _isToday(d2),
-                                      slots: _slotsForDayIndex(d2),
-                                      onTap: (s) => _openDetail(s, d2),
-                                    ),
-                                  ),
-                              ],
-                            );
-                          },
-                        ),
+                      ? _buildError()
+                      : _buildCalendar(),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-// ── Day Column ─────────────────────────────────────────────────────────────────
-class _DayColumn extends StatelessWidget {
-  final String label;
-  final bool isToday;
-  final List<ScheduleSlot> slots;
-  final void Function(ScheduleSlot) onTap;
+  Widget _buildError() => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.wifi_off_rounded, size: 40, color: Color(0xFF444444)),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(_error!, textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF888888), fontSize: 13)),
+        ),
+        const SizedBox(height: 16),
+        TextButton(onPressed: _load, child: const Text('Reintentar')),
+      ],
+    ),
+  );
 
-  const _DayColumn({
-    required this.label,
-    required this.isToday,
-    required this.slots,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildCalendar() {
     return Column(
       children: [
-        // ── Day header ──────────────────────────────────────────────────
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isToday
-                ? const Color(0xFF00F5D4).withOpacity(0.10)
-                : const Color(0xFF0E0E18),
-            border: Border(
-              right: const BorderSide(color: Color(0xFF1A1A28)),
-              bottom: BorderSide(
-                color: isToday
-                    ? const Color(0xFF00F5D4).withOpacity(0.35)
-                    : const Color(0xFF1A1A28),
+        // ── Sticky day-name headers ───────────────────────────────────────
+        Row(
+          children: [
+            SizedBox(width: _kLabelWidth), // spacer for hour labels
+            Expanded(
+              child: SizedBox(
+                height: 38,
+                child: PageView.builder(
+                  controller: _headerPageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _pageCount,
+                  itemBuilder: (_, page) {
+                    final d1 = page * _daysPerPage;
+                    final d2 = d1 + 1;
+                    return Row(
+                      children: [
+                        Expanded(child: _DayHeader(label: _shortDayLabel(d1), isToday: _isToday(d1))),
+                        if (d2 < 7) Expanded(child: _DayHeader(label: _shortDayLabel(d2), isToday: _isToday(d2))),
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: isToday
-                  ? const Color(0xFF00F5D4)
-                  : const Color(0xFFAAAAAA),
-            ),
+          ],
+        ),
+
+        // ── Page indicator ────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: Row(
+            children: [
+              Text(
+                _pageLabel(_currentPage),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF00F5D4)),
+              ),
+              const Spacer(),
+              Row(
+                children: List.generate(_pageCount, (i) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: i == _currentPage ? 18 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(3),
+                    color: i == _currentPage ? const Color(0xFF00F5D4) : const Color(0xFF2A2A3A),
+                  ),
+                )),
+              ),
+            ],
           ),
         ),
-        // ── Slots ───────────────────────────────────────────────────────
+
+        // ── Time grid (scrollable vertically) ────────────────────────────
         Expanded(
-          child: slots.isEmpty
-              ? Center(
-                  child: Text(
-                    'Sin clases',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.white.withOpacity(0.15),
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-                  itemCount: slots.length,
-                  itemBuilder: (_, i) => _MiniCard(
-                    slot: slots[i],
-                    onTap: () => onTap(slots[i]),
-                  ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Hour labels (fixed left column)
+              SizedBox(
+                width: _kLabelWidth,
+                child: SingleChildScrollView(
+                  controller: _timeController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  child: _HourLabels(),
                 ),
+              ),
+              // Day columns (swipeable horizontally, scroll vertically)
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: _pageCount,
+                  onPageChanged: (p) {
+                    setState(() => _currentPage = p);
+                    _headerPageController.jumpTo(_pageController.offset);
+                  },
+                  itemBuilder: (_, page) {
+                    final d1 = page * _daysPerPage;
+                    final d2 = d1 + 1;
+                    return NotificationListener<ScrollNotification>(
+                      onNotification: (n) {
+                        if (n is ScrollUpdateNotification && _timeController.hasClients) {
+                          _timeController.jumpTo(n.metrics.pixels);
+                        }
+                        return false;
+                      },
+                      child: SingleChildScrollView(
+                        child: SizedBox(
+                          height: _kTotalHours * _kHourHeight,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: _DayColumn(
+                                  slots: _slotsForDayIndex(d1),
+                                  isToday: _isToday(d1),
+                                  now: _now,
+                                  onTap: (s) => _openDetail(s, d1),
+                                ),
+                              ),
+                              if (d2 < 7)
+                                Expanded(
+                                  child: _DayColumn(
+                                    slots: _slotsForDayIndex(d2),
+                                    isToday: _isToday(d2),
+                                    now: _now,
+                                    onTap: (s) => _openDetail(s, d2),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 }
 
-// ── Mini Card ──────────────────────────────────────────────────────────────────
-class _MiniCard extends StatelessWidget {
+// ── Hour Labels Column ────────────────────────────────────────────────────────
+class _HourLabels extends StatelessWidget {
+  const _HourLabels();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: _kTotalHours * _kHourHeight,
+      child: Stack(
+        children: List.generate(_kTotalHours, (h) => Positioned(
+          top: h * _kHourHeight - 7,
+          left: 0, right: 0,
+          child: Text(
+            '${h.toString().padLeft(2, '0')}:00',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 10, color: Color(0xFF444455)),
+          ),
+        )),
+      ),
+    );
+  }
+}
+
+// ── Day Header ────────────────────────────────────────────────────────────────
+class _DayHeader extends StatelessWidget {
+  final String label;
+  final bool isToday;
+  const _DayHeader({required this.label, required this.isToday});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: isToday ? const Color(0xFF00F5D4).withOpacity(0.08) : const Color(0xFF0E0E18),
+      border: Border(
+        bottom: BorderSide(
+          color: isToday ? const Color(0xFF00F5D4).withOpacity(0.4) : const Color(0xFF1A1A28),
+        ),
+        right: const BorderSide(color: Color(0xFF1A1A28)),
+      ),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 12, fontWeight: FontWeight.w700,
+        color: isToday ? const Color(0xFF00F5D4) : const Color(0xFFAAAAAA),
+      ),
+    ),
+  );
+}
+
+// ── Day Column (Stack with proportional time blocks) ──────────────────────────
+class _DayColumn extends StatelessWidget {
+  final List<ScheduleSlot> slots;
+  final bool isToday;
+  final DateTime now;
+  final void Function(ScheduleSlot) onTap;
+
+  const _DayColumn({
+    required this.slots,
+    required this.isToday,
+    required this.now,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final nowMins = now.hour * 60 + now.minute;
+
+    return Container(
+      height: _kTotalHours * _kHourHeight,
+      decoration: const BoxDecoration(
+        border: Border(right: BorderSide(color: Color(0xFF1A1A28))),
+      ),
+      child: Stack(
+        children: [
+          // ── Hour grid lines ──────────────────────────────────────────────
+          ...List.generate(_kTotalHours, (h) => Positioned(
+            top: h * _kHourHeight,
+            left: 0, right: 0,
+            child: Container(height: 1, color: const Color(0xFF1A1A28).withOpacity(0.5)),
+          )),
+
+          // ── Half-hour dashes ─────────────────────────────────────────────
+          ...List.generate(_kTotalHours, (h) => Positioned(
+            top: h * _kHourHeight + _kHourHeight / 2,
+            left: 8, right: 8,
+            child: Container(height: 1, color: const Color(0xFF1A1A28).withOpacity(0.25)),
+          )),
+
+          // ── Class blocks ──────────────────────────────────────────────────
+          ...slots.map((slot) => Positioned(
+            top:    _topForTime(slot.startTime),
+            left:   2,
+            right:  2,
+            height: _heightForSlot(slot),
+            child: _TimeBlock(slot: slot, onTap: () => onTap(slot)),
+          )),
+
+          // ── Now line (today only) ─────────────────────────────────────────
+          if (isToday)
+            Positioned(
+              top: nowMins * _kPxPerMin - 1,
+              left: 0, right: 0,
+              child: Row(
+                children: [
+                  Container(
+                    width: 8, height: 8,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFEF4444),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Expanded(child: Container(height: 1.5, color: const Color(0xFFEF4444))),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Time Block (proportional height class card) ───────────────────────────────
+class _TimeBlock extends StatelessWidget {
   final ScheduleSlot slot;
   final VoidCallback onTap;
-  const _MiniCard({required this.slot, required this.onTap});
+
+  const _TimeBlock({required this.slot, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final color = slot.slotColor;
-    final slotDate = DateTime.tryParse(slot.nextDate);
-    final today = DateTime.now();
-    final todayDate = DateTime(today.year, today.month, today.day);
-    final isPast = slotDate != null && slotDate.isBefore(todayDate);
-    // PRESENTE shows for any attended slot — attendance is historical, always visible
+    final slotDate  = DateTime.tryParse(slot.nextDate);
+    final todayDate = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final isPast    = slotDate != null && slotDate.isBefore(todayDate);
     final isPresent = slot.isPresent;
-    // RESERVADO only shows for future/today slots
-    final isBooked = slot.isBooked && !isPast;
-    final isFull = slot.isFull && !isBooked && !isPresent;
-    const presentColor = Color(0xFF10B981); // green
+    final isBooked  = slot.isBooked && !isPast;
+    final isFull    = slot.isFull && !isBooked && !isPresent;
+
+    const presentColor = Color(0xFF10B981);
+    final blockH = _heightForSlot(slot);
+    final compact = blockH < 42;
+    final tiny    = blockH < 28;
+
+    Color bgColor;
+    Color borderColor;
+    if (isPresent) {
+      bgColor     = presentColor.withOpacity(0.12);
+      borderColor = presentColor.withOpacity(0.5);
+    } else if (isBooked) {
+      bgColor     = color.withOpacity(0.14);
+      borderColor = color.withOpacity(0.55);
+    } else if (isFull) {
+      bgColor     = const Color(0xFF111118);
+      borderColor = const Color(0xFF252530);
+    } else {
+      bgColor     = const Color(0xFF16161F);
+      borderColor = color.withOpacity(0.25);
+    }
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 7),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          color: isPresent
-              ? presentColor.withOpacity(0.10)
-              : isBooked
-                  ? color.withOpacity(0.12)
-                  : isFull ? const Color(0xFF111118) : const Color(0xFF14141E),
-          border: Border.all(
-            color: isPresent
-                ? presentColor.withOpacity(0.5)
-                : isBooked
-                    ? color.withOpacity(0.5)
-                    : isFull ? const Color(0xFF252530) : color.withOpacity(0.2),
+          color: bgColor,
+          borderRadius: BorderRadius.circular(6),
+          border: Border(
+            left: BorderSide(color: isFull ? const Color(0xFF282832) : color, width: 3),
+            top:    BorderSide(color: borderColor),
+            right:  BorderSide(color: borderColor),
+            bottom: BorderSide(color: borderColor),
           ),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Accent bar
-            Container(
-              width: 3,
-              height: 60,
-              decoration: BoxDecoration(
-                color: isFull ? const Color(0xFF282832) : color,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(10),
-                  bottomLeft: Radius.circular(10),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      slot.className ?? 'Clase',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: isFull
-                            ? const Color(0xFF555566)
-                            : const Color(0xFFEEEEEE),
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Text(
-                          slot.startTime.substring(0, 5),
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: isFull ? const Color(0xFF3A3A4A) : color,
-                          ),
-                        ),
-                        if (isPresent) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: presentColor.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: presentColor.withOpacity(0.4)),
-                            ),
-                            child: const Text(
-                              'PRESENTE',
-                              style: TextStyle(
-                                fontSize: 8,
-                                fontWeight: FontWeight.w800,
-                                color: presentColor,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                        ] else if (isBooked) ...[
-                          const SizedBox(width: 6),
-                          Icon(Icons.check_circle, size: 11, color: color),
-                        ],
-                      ],
-                    ),
-                    if (slot.capacity != null && !isBooked) ...[
-                      const SizedBox(height: 2),
+        padding: EdgeInsets.fromLTRB(5, tiny ? 2 : 4, 4, 2),
+        child: tiny
+            // Very small: just time
+            ? Text(
+                slot.startTime.substring(0, 5),
+                style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800,
+                    color: isFull ? const Color(0xFF3A3A4A) : color),
+                overflow: TextOverflow.clip,
+                maxLines: 1,
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Time + badge row
+                  Row(
+                    children: [
                       Text(
-                        isFull
-                            ? 'Lleno'
-                            : slot.spotsLeft <= 3
-                                ? '${slot.spotsLeft} lugar${slot.spotsLeft == 1 ? '' : 'es'}'
-                                : '',
+                        slot.startTime.substring(0, 5),
                         style: TextStyle(
-                          fontSize: 9,
-                          color: isFull
-                              ? const Color(0xFF444455)
-                              : const Color(0xFFF59E0B),
+                          fontSize: compact ? 9 : 10,
+                          fontWeight: FontWeight.w800,
+                          color: isFull ? const Color(0xFF3A3A4A) : color,
                         ),
                       ),
+                      if (isPresent) ...[ 
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: presentColor.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Text('✓', style: TextStyle(fontSize: 7, color: presentColor)),
+                        ),
+                      ] else if (isBooked) ...[
+                        const SizedBox(width: 3),
+                        Icon(Icons.check_circle, size: 9, color: color),
+                      ],
+                      if (isFull && !compact) ...[
+                        const SizedBox(width: 4),
+                        const Text('Lleno', style: TextStyle(fontSize: 8, color: Color(0xFF555566))),
+                      ],
                     ],
+                  ),
+                  if (!compact) ...[
+                    const SizedBox(height: 2),
+                    Flexible(
+                      child: Text(
+                        slot.className ?? 'Clase',
+                        maxLines: blockH > 80 ? 3 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          height: 1.2,
+                          color: isFull ? const Color(0xFF555566) : const Color(0xFFEEEEEE),
+                        ),
+                      ),
+                    ),
                   ],
-                ),
+                ],
               ),
-            ),
-            const SizedBox(width: 6),
-          ],
-        ),
       ),
     );
   }
@@ -544,12 +671,11 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
       );
       setState(() {
         _feedbackOk = true;
-        _feedback = res['message'] as String? ?? '¡Reserva confirmada!';
-        _working = false;
-        _localBookedCount++; // update counter immediately
+        _feedback   = res['message'] as String? ?? '¡Reserva confirmada!';
+        _working    = false;
+        _localBookedCount++;
       });
       widget.onDone();
-      // Refresh member data so credits update on home screen
       if (mounted) context.read<AuthProvider>().refresh();
     } catch (e) {
       setState(() { _feedbackOk = false; _feedback = e.toString(); _working = false; });
@@ -564,11 +690,10 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
       );
       setState(() {
         _feedbackOk = true;
-        _feedback = res['message'] as String? ?? 'Reserva cancelada.';
-        _working = false;
+        _feedback   = res['message'] as String? ?? 'Reserva cancelada.';
+        _working    = false;
       });
       widget.onDone();
-      // Refresh member data so credits restore on home screen
       if (mounted) context.read<AuthProvider>().refresh();
     } catch (e) {
       setState(() { _feedbackOk = false; _feedback = e.toString(); _working = false; });
@@ -577,15 +702,14 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final slot = widget.slot;
-    final color = slot.slotColor;
+    final slot      = widget.slot;
+    final color     = slot.slotColor;
     final isPresent = slot.isPresent;
-    final isBooked = slot.isBooked;
-    final isFull = slot.isFull && !isBooked && !isPresent;
+    final isBooked  = slot.isBooked;
+    final isFull    = slot.isFull && !isBooked && !isPresent;
 
-    // Build date label without locale (avoids LocaleDataException)
     const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-    final dow = widget.date.weekday - 1; // 0=Mon..6=Sun
+    final dow     = widget.date.weekday - 1;
     final dayName = dayNames[dow.clamp(0, 6)];
     final dateStr = '$dayName ${widget.date.day} de ${DateFormat('MMMM').format(widget.date)}';
 
@@ -606,10 +730,7 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
               child: Container(
                 margin: const EdgeInsets.only(top: 12, bottom: 20),
                 width: 40, height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2E2E3E),
-                  borderRadius: BorderRadius.circular(2),
-                ),
+                decoration: BoxDecoration(color: const Color(0xFF2E2E3E), borderRadius: BorderRadius.circular(2)),
               ),
             ),
             Row(
@@ -629,9 +750,9 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
             ),
             const SizedBox(height: 18),
             _InfoRow(icon: Icons.calendar_today_outlined, label: dateStr),
-            _InfoRow(icon: Icons.schedule_outlined, label: slot.displayTime),
-            if (slot.salaName != null) _InfoRow(icon: Icons.room_outlined, label: slot.salaName!),
-            if (slot.instructorName != null) _InfoRow(icon: Icons.person_outline, label: slot.instructorName!),
+            _InfoRow(icon: Icons.schedule_outlined,       label: slot.displayTime),
+            if (slot.salaName != null)       _InfoRow(icon: Icons.room_outlined,    label: slot.salaName!),
+            if (slot.instructorName != null) _InfoRow(icon: Icons.person_outline,   label: slot.instructorName!),
             if (slot.capacity != null)
               _InfoRow(
                 icon: Icons.people_outline,
@@ -652,20 +773,16 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
                 ),
                 child: Text(
                   _feedback!,
-                  style: TextStyle(
-                    color: _feedbackOk ? const Color(0xFF00F5D4) : const Color(0xFFEF4444),
-                    fontSize: 13,
-                  ),
+                  style: TextStyle(color: _feedbackOk ? const Color(0xFF00F5D4) : const Color(0xFFEF4444), fontSize: 13),
                 ),
               ),
             SizedBox(
               width: double.infinity, height: 50,
               child: Builder(builder: (context) {
-                final today = DateTime.now();
+                final today     = DateTime.now();
                 final todayDate = DateTime(today.year, today.month, today.day);
-                final isPast = widget.date.isBefore(todayDate);
+                final isPast    = widget.date.isBefore(todayDate);
 
-                // Already attended — show green chip, no action
                 if (isPresent)
                   return Container(
                     alignment: Alignment.center,
@@ -705,7 +822,8 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
                 return ElevatedButton.icon(
                   onPressed: (_working || isFull || isPast) ? null : _book,
                   icon: _working
-                      ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                      ? const SizedBox(width: 15, height: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
                       : Icon(isPast ? Icons.block_outlined : Icons.check_circle_outline, size: 17),
                   label: Text(
                     _working ? 'Reservando...'
@@ -714,8 +832,8 @@ class _SlotDetailSheetState extends State<_SlotDetailSheet> {
                     :           'Reservar lugar',
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: (isFull || isPast) ? const Color(0xFF2A2A2A) : const Color(0xFF00F5D4),
-                    foregroundColor: (isFull || isPast) ? const Color(0xFF555555) : const Color(0xFF080810),
+                    backgroundColor:        (isFull || isPast) ? const Color(0xFF2A2A2A) : const Color(0xFF00F5D4),
+                    foregroundColor:        (isFull || isPast) ? const Color(0xFF555555) : const Color(0xFF080810),
                     disabledBackgroundColor: const Color(0xFF2A2A2A),
                     disabledForegroundColor: const Color(0xFF555555),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
@@ -740,18 +858,15 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Row(
-          children: [
-            Icon(icon, size: 15, color: const Color(0xFF555566)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(fontSize: 14, color: valueColor ?? const Color(0xFFCCCCCC)),
-              ),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(
+      children: [
+        Icon(icon, size: 15, color: const Color(0xFF555566)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(label, style: TextStyle(fontSize: 14, color: valueColor ?? const Color(0xFFCCCCCC))),
         ),
-      );
+      ],
+    ),
+  );
 }
