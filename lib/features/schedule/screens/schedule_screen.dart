@@ -103,10 +103,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   void _scrollToNow() {
     if (!_timeController.hasClients) return;
-    final nowMins  = _now.hour * 60 + _now.minute;
-    final targetPx = (nowMins * _kPxPerMin - 100).clamp(0.0, _kTotalHours * _kHourHeight);
+    // Start at 07:00 — clases casi nunca arrancan antes de las 7am
+    const startHour = 7;
     _timeController.animateTo(
-      targetPx,
+      startHour * _kHourHeight,
       duration: const Duration(milliseconds: 500),
       curve: Curves.easeOut,
     );
@@ -558,18 +558,23 @@ class _TimeBlock extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(6),
-          border: Border(
-            left: BorderSide(color: isFull ? const Color(0xFF282832) : color, width: 3),
-            top:    BorderSide(color: borderColor),
-            right:  BorderSide(color: borderColor),
-            bottom: BorderSide(color: borderColor),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: borderColor),
           ),
-        ),
-        padding: EdgeInsets.fromLTRB(5, tiny ? 2 : 4, 4, 2),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Left accent bar
+              Container(width: 3, color: isFull ? const Color(0xFF282832) : color),
+              // Content
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(5, tiny ? 2 : 4, 4, 2),
         child: tiny
             // Very small: just time
             ? Text(
@@ -579,58 +584,78 @@ class _TimeBlock extends StatelessWidget {
                 overflow: TextOverflow.clip,
                 maxLines: 1,
               )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Time + badge row
-                  Row(
-                    children: [
-                      Text(
-                        slot.startTime.substring(0, 5),
-                        style: TextStyle(
-                          fontSize: compact ? 9 : 10,
-                          fontWeight: FontWeight.w800,
-                          color: isFull ? const Color(0xFF3A3A4A) : color,
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Time + status badge
+                            Row(
+                              children: [
+                                Text(
+                                  slot.startTime.substring(0, 5),
+                                  style: TextStyle(
+                                    fontSize: compact ? 9 : 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: isFull ? const Color(0xFF3A3A4A) : color,
+                                  ),
+                                ),
+                                if (isPresent) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: presentColor.withOpacity(0.25),
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                    child: const Text(
+                                      'PRESENTE',
+                                      style: TextStyle(
+                                        fontSize: 7,
+                                        fontWeight: FontWeight.w800,
+                                        color: presentColor,
+                                        letterSpacing: 0.3,
+                                      ),
+                                    ),
+                                  ),
+                                ] else if (isBooked) ...[
+                                  const SizedBox(width: 3),
+                                  Icon(Icons.check_circle, size: 9, color: color),
+                                ],
+                              ],
+                            ),
+                            // Class name
+                            if (!compact) ...[
+                              const SizedBox(height: 1),
+                              Text(
+                                slot.className ?? 'Clase',
+                                maxLines: blockH > 80 ? 3 : 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.2,
+                                  color: isFull ? const Color(0xFF555566) : const Color(0xFFEEEEEE),
+                                ),
+                              ),
+                            ],
+                            // Low capacity warning
+                            if (!compact && !isBooked && !isPresent && slot.capacity != null) ...[
+                              const SizedBox(height: 1),
+                              if (isFull)
+                                const Text('Sin lugares', style: TextStyle(fontSize: 8, color: Color(0xFF555566)))
+                              else if (slot.spotsLeft <= 3)
+                                Text(
+                                  '${slot.spotsLeft} lugar${slot.spotsLeft == 1 ? '' : 'es'}',
+                                  style: const TextStyle(fontSize: 8, color: Color(0xFFF59E0B)),
+                                ),
+                            ],
+                          ],
                         ),
-                      ),
-                      if (isPresent) ...[ 
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: presentColor.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const Text('✓', style: TextStyle(fontSize: 7, color: presentColor)),
-                        ),
-                      ] else if (isBooked) ...[
-                        const SizedBox(width: 3),
-                        Icon(Icons.check_circle, size: 9, color: color),
-                      ],
-                      if (isFull && !compact) ...[
-                        const SizedBox(width: 4),
-                        const Text('Lleno', style: TextStyle(fontSize: 8, color: Color(0xFF555566))),
-                      ],
-                    ],
-                  ),
-                  if (!compact) ...[
-                    const SizedBox(height: 2),
-                    Flexible(
-                      child: Text(
-                        slot.className ?? 'Clase',
-                        maxLines: blockH > 80 ? 3 : 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          height: 1.2,
-                          color: isFull ? const Color(0xFF555566) : const Color(0xFFEEEEEE),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+                ),
               ),
+            ],
+          ),
+        ),
       ),
     );
   }
