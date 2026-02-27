@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../../core/api_client.dart';
 import '../../core/constants.dart';
+import '../../core/notification_service.dart';
 import '../../core/token_storage.dart';
 import '../../models/member.dart';
 import 'auth_repository.dart';
@@ -132,12 +135,33 @@ class AuthProvider extends ChangeNotifier {
         _cachedLogoFilePath = await TokenStorage.cacheGymLogoBytes(logoUrl);
       }
       notifyListeners();
+      // Register FCM token with backend (fire-and-forget)
+      _registerFcmToken();
       return true;
     } catch (e) {
       _error = e.toString();
       _loading = false;
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Silently uploads the FCM device token to the backend after login.
+  Future<void> _registerFcmToken() async {
+    try {
+      final fcmToken = await NotificationService.getToken();
+      if (fcmToken == null || _token == null) return;
+      await http.post(
+        Uri.parse('${AppConstants.baseUrl}/api/member-register-token.php'),
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'fcm_token': fcmToken, 'platform': 'android'}),
+      );
+      debugPrint('[FCM] Token registered');
+    } catch (e) {
+      debugPrint('[FCM] Token registration failed: $e');
     }
   }
 
