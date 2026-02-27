@@ -1,7 +1,7 @@
 name: gymflowclient
 description: GymFlow — App para alumnos
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.3+22
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
