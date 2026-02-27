@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'core/connectivity_service.dart';
 import 'features/auth/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'features/auth/screens/register_screen.dart';
@@ -133,6 +134,9 @@ class MainShell extends StatelessWidget {
     final membership = member?.membership;
     final hasActiveMembership = membership != null && membership.isActive;
 
+    final conn = context.watch<ConnectivityService>();
+    final isOnline = conn.isOnline;
+
     // Only show onboarding when member data is confirmed loaded and has no active membership
     if (auth.isAuthenticated && member != null && !auth.loadingMember && !hasActiveMembership) {
       return const NoMembershipScreen();
@@ -140,7 +144,58 @@ class MainShell extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: const Color(0xFF080810),
-      body: child,
+      body: Stack(
+        children: [
+          child,
+          // ── Offline banner ──────────────────────────────────────────────────
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeInOut,
+            top: isOnline ? -60 : MediaQuery.of(context).padding.top,
+            left: 0,
+            right: 0,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                color: const Color(0xFFEF4444),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.wifi_off, color: Colors.white, size: 16),
+                        SizedBox(width: 8),
+                        Text(
+                          'Sin conexión. Verificá tu internet.',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    GestureDetector(
+                      onTap: () => conn.recheck(),
+                      child: const Text(
+                        'Reintentar',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          decoration: TextDecoration.underline,
+                          decorationColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         backgroundColor: const Color(0xFF14141E),
         surfaceTintColor: Colors.transparent,

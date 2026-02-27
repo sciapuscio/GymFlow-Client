@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'core/connectivity_service.dart';
 import 'core/notification_service.dart';
 import 'features/auth/auth_provider.dart';
 import 'router.dart';
@@ -10,9 +11,14 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   await NotificationService.init();
+  // Start connectivity monitoring
+  ConnectivityService().startMonitoring();
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AuthProvider()..init(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()..init()),
+        ChangeNotifierProvider.value(value: ConnectivityService()),
+      ],
       child: const GymFlowApp(),
     ),
   );
