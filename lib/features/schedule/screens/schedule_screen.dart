@@ -161,7 +161,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final dow = _orderedDow[dayIndex];
     return _slots.where((s) {
       if (s.dayOfWeek != dow) return false;
-      if (_selectedSedeId != null && s.sedeId != _selectedSedeId) return false;
+      if (_selectedSedeId == null) {
+        // Gimnasio central: solo clases sin sede específica
+        if (s.sedeId != null) return false;
+      } else {
+        // Sede específica: solo clases de esa sede
+        if (s.sedeId != _selectedSedeId) return false;
+      }
       return true;
     }).toList()
       ..sort((a, b) => a.startTime.compareTo(b.startTime));
