@@ -28,6 +28,8 @@ class ScheduleSlot {
   final String endTime;
   final String? className;
   final String? salaName;
+  final String? sedeName;
+  final int? sedeId;
   final String? instructorName;
   final String? color;      // hex e.g. "#00f5d4"
   final int? capacity;      // null = unlimited
@@ -42,6 +44,8 @@ class ScheduleSlot {
     required this.endTime,
     this.className,
     this.salaName,
+    this.sedeName,
+    this.sedeId,
     this.instructorName,
     this.color,
     this.capacity,
@@ -59,6 +63,10 @@ class ScheduleSlot {
         endTime: json['end_time'] as String,
         className: json['class_name'] as String?,
         salaName: json['sala_name'] as String?,
+        sedeName: json['sede_name'] as String?,
+        sedeId: json['sede_id'] != null
+            ? (json['sede_id'] is int ? json['sede_id'] : int.tryParse(json['sede_id'].toString()))
+            : null,
         instructorName: json['instructor_name'] as String?,
         color: json['color'] as String?,
         capacity: json['capacity'] != null

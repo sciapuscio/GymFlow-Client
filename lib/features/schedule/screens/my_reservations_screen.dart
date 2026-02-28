@@ -206,10 +206,23 @@ class _ReservationCard extends StatelessWidget {
     DateTime? dateObj;
     try { dateObj = DateTime.parse(date); } catch (_) {}
 
-    // Cancelable solo si la fecha es hoy o futura Y el status es 'reserved'
-    final today = DateTime.now();
-    final todayDate = DateTime(today.year, today.month, today.day);
-    final isPast = dateObj != null && dateObj.isBefore(todayDate);
+    // Build full class datetime by combining class_date + class_time
+    DateTime? classDateTime;
+    if (dateObj != null && time.length == 5) {
+      try {
+        final parts = time.split(':');
+        classDateTime = DateTime(
+          dateObj.year, dateObj.month, dateObj.day,
+          int.parse(parts[0]), int.parse(parts[1]),
+        );
+      } catch (_) {}
+    }
+
+    // A reservation is "past" if the class datetime already happened
+    final now = DateTime.now();
+    final isPast = classDateTime != null
+        ? now.isAfter(classDateTime)          // class already started
+        : (dateObj != null && dateObj.isBefore(DateTime(now.year, now.month, now.day)));
     final isActive  = status == 'reserved' && !isPast;
 
     const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
