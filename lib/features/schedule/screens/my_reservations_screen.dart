@@ -235,8 +235,8 @@ class _ReservationCard extends StatelessWidget {
     }
 
     // Estado visual
-    final bool isAttended = status == 'attended';
-    final bool isAbsent   = (isPast && status != 'cancelled' && !isAttended) || status == 'absent';
+    final bool isAttended  = status == 'attended' || status == 'present';
+    final bool isAbsent    = (isPast && status != 'cancelled' && !isAttended) || status == 'absent';
     final bool isCancelled = status == 'cancelled';
 
     // Color de la barra lateral según estado
