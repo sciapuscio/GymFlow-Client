@@ -18,8 +18,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _sedes = [];
-  int? _selectedSedeId;  // null = todas las sedes
-  bool _sedeRestoredFromServer = false; // restore only once per session
+  int? _selectedSedeId;  // null = gimnasio central (sin filtro de sede)
+  bool _sedeRestoredFromServer = false;
+  String _gymName = 'Central';
 
   // 0 = esta semana, 1 = semana que viene, 2 = en dos semanas
   int _weekOffset = 0;
@@ -76,6 +77,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       setState(() {
         _slots = rawSlots.map((s) => ScheduleSlot.fromJson(s as Map<String, dynamic>)).toList();
         _sedes = rawSedes.map((s) => s as Map<String, dynamic>).toList();
+        _gymName = (data['gym'] as Map<String, dynamic>?)?['name'] as String? ?? 'Central';
         // Restore preferred sede from server only on first load
         if (!_sedeRestoredFromServer && preferredSedeId != null) {
           _selectedSedeId = preferredSedeId is int ? preferredSedeId : int.tryParse(preferredSedeId.toString());
@@ -129,8 +131,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             const SizedBox(height: 14),
             // "Todas" option
             _SedeOption(
-              label: 'Todas las sedes',
-              subtitle: 'Ver clases de todas las sedes',
+              label: _gymName,
+              subtitle: 'Clases del gimnasio central',
               selected: _selectedSedeId == null,
               onTap: () {
                 setState(() => _selectedSedeId = null);
@@ -272,7 +274,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                       (s) => s['id'] == _selectedSedeId,
                                       orElse: () => {'name': 'Sede'},
                                     )['name'] as String)
-                                  : 'Todas',
+                                  : _gymName,
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
