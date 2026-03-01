@@ -215,10 +215,24 @@ class _ExerciseCardState extends State<_ExerciseCard> {
     super.dispose();
   }
 
+  static Color _blockColor(String type) {
+    switch (type.toLowerCase()) {
+      case 'tabata':  return const Color(0xFFFF6B35);
+      case 'amrap':   return const Color(0xFF7C3AED);
+      case 'emom':    return const Color(0xFF0EA5E9);
+      case 'interval':return const Color(0xFF00F5D4);
+      case 'fortime': return const Color(0xFFF59E0B);
+      case 'series':  return const Color(0xFFEC4899);
+      case 'circuit': return const Color(0xFF10B981);
+      default:        return const Color(0xFF888888);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final rm = widget.entry.rmEstimated;
     final hasRm = rm > 0;
+    final blockColor = _blockColor(widget.entry.exercise.blockType);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -233,25 +247,23 @@ class _ExerciseCardState extends State<_ExerciseCard> {
           // Header row with dismiss button
           Row(
             children: [
-              if (!widget.isManual) ...
-                [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF00F5D4).withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      widget.entry.exercise.blockName.isNotEmpty
-                          ? widget.entry.exercise.blockName
-                          : widget.entry.exercise.blockType.toUpperCase(),
-                      style: const TextStyle(
-                          fontSize: 10,
-                          color: Color(0xFF00F5D4),
-                          fontWeight: FontWeight.w700),
-                    ),
+              if (!widget.isManual)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: blockColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                ],
+                  child: Text(
+                    widget.entry.exercise.blockName.isNotEmpty
+                        ? widget.entry.exercise.blockName
+                        : widget.entry.exercise.blockType.toUpperCase(),
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: blockColor,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
               const Spacer(),
               GestureDetector(
                 onTap: widget.onDismiss,
