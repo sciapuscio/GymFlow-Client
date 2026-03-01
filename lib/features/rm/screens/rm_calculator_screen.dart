@@ -36,7 +36,7 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
         _sessionName = 'Entrada manual';
         _entries = [
           RmEntry(
-            exercise: const RmExercise(
+            exercise: RmExercise(
                 name: '', reps: 5, blockName: 'Manual', blockType: 'manual'),
             reps: 5,
           ),
@@ -99,7 +99,7 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
   void _addManualEntry() {
     setState(() {
       _entries.add(RmEntry(
-        exercise: const RmExercise(
+        exercise: RmExercise(
             name: '', reps: 5, blockName: 'Manual', blockType: 'manual'),
         reps: 5,
       ));
@@ -162,6 +162,7 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
                               entry: _entries[i],
                               isManual: isManual,
                               onChanged: () => setState(() {}),
+                              onDismiss: () => setState(() => _entries.removeAt(i)),
                             ),
                           ),
                         ),
@@ -178,10 +179,12 @@ class _ExerciseCard extends StatefulWidget {
   final RmEntry entry;
   final bool isManual;
   final VoidCallback onChanged;
+  final VoidCallback onDismiss;
   const _ExerciseCard(
       {required this.entry,
       required this.isManual,
-      required this.onChanged});
+      required this.onChanged,
+      required this.onDismiss});
 
   @override
   State<_ExerciseCard> createState() => _ExerciseCardState();
@@ -227,7 +230,37 @@ class _ExerciseCardState extends State<_ExerciseCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Exercise name — editable in manual mode, label in WOD mode
+          // Header row with dismiss button
+          Row(
+            children: [
+              if (!widget.isManual) ...
+                [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00F5D4).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      widget.entry.exercise.blockName.isNotEmpty
+                          ? widget.entry.exercise.blockName
+                          : widget.entry.exercise.blockType.toUpperCase(),
+                      style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF00F5D4),
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              const Spacer(),
+              GestureDetector(
+                onTap: widget.onDismiss,
+                child: const Icon(Icons.close, size: 16, color: Color(0xFF555566)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Exercise name
           if (widget.isManual)
             TextField(
               controller: _nameCtrl,
@@ -242,51 +275,27 @@ class _ExerciseCardState extends State<_ExerciseCard> {
                 fillColor: const Color(0xFF1E1E2E),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF333344))),
+                    borderSide: const BorderSide(color: Color(0xFF333344))),
                 enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF333344))),
+                    borderSide: const BorderSide(color: Color(0xFF333344))),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF00F5D4))),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
+                    borderSide: const BorderSide(color: Color(0xFF00F5D4))),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
               onChanged: (v) {
-                (widget.entry.exercise as dynamic); // can't mutate const
-                // Rebuild entry with new name via a workaround
                 widget.entry.overrideName(v);
                 widget.onChanged();
               },
             )
-          else ...[
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFF00F5D4).withOpacity(0.12),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                widget.entry.exercise.blockName.isNotEmpty
-                    ? widget.entry.exercise.blockName
-                    : widget.entry.exercise.blockType.toUpperCase(),
-                style: const TextStyle(
-                    fontSize: 10,
-                    color: Color(0xFF00F5D4),
-                    fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(height: 8),
+          else
             Text(widget.entry.exercise.name,
                 style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                     color: Colors.white)),
-          ],
           const SizedBox(height: 12),
           Row(
             children: [
