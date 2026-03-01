@@ -32,6 +32,8 @@ class AppConstants {
   static String get gymPortalUrl  => '$_baseUrl/api/gym-portal.php';
   static String get changePasswordUrl => '$_baseUrl/api/member-change-password.php';
   static String get sedePreferenceUrl => '$_baseUrl/api/member-sede-preference.php';
+  static String get rmCalculatorUrl   => '$_baseUrl/api/rm-calculator.php';
+
 
   // ── Token storage key ────────────────────────────────────────────────────────
   static const String tokenKey = 'gf_member_token';

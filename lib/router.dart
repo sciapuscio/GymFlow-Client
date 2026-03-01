@@ -15,6 +15,8 @@ import 'features/checkin/screens/checkin_result_screen.dart';
 import 'features/profile/screens/profile_screen.dart';
 import 'features/schedule/screens/my_reservations_screen.dart';
 import 'features/auth/screens/change_password_screen.dart';
+import 'features/rm/screens/rm_calculator_screen.dart';
+import 'features/rm/screens/rm_history_screen.dart';
 
 final routerKey = GlobalKey<NavigatorState>();
 
@@ -103,6 +105,20 @@ GoRouter buildRouter(AuthProvider auth) {
           GoRoute(
             path: '/my-reservations',
             builder: (_, __) => const MyReservationsScreen(),
+          ),
+          GoRoute(
+            path: '/rm-calculator',
+            builder: (_, state) {
+              final sid = state.uri.queryParameters['session_id'];
+              return RmCalculatorScreen(sessionId: sid != null ? int.tryParse(sid) : null);
+            },
+          ),
+          GoRoute(
+            path: '/rm-history',
+            builder: (_, state) {
+              final ex = state.uri.queryParameters['exercise'];
+              return RmHistoryScreen(exerciseName: ex);
+            },
           ),
         ],
       ),

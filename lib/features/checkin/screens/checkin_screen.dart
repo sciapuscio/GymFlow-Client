@@ -7,6 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/api_client.dart';
 import '../../../core/constants.dart';
 import '../../auth/auth_provider.dart';
+import '../../rm/screens/rm_calculator_screen.dart';
 
 // ── Platform guard ────────────────────────────────────────────────────────────
 // mobile_scanner only builds on Android / iOS.
@@ -131,6 +132,26 @@ class _MobileScannerViewState extends State<_MobileScannerView> {
     }
 
     if (gymQrToken.isEmpty) return;
+
+    // ── RM Calculator QR detection ─────────────────────────────────────────
+    // QR URL pattern: BASE/rm?s=SESSION_ID
+    try {
+      final uri = Uri.parse(rawValue.trim());
+      final sessionParam = uri.queryParameters['s'];
+      if (sessionParam != null && sessionParam.isNotEmpty && uri.path.endsWith('/rm')) {
+        final sessionId = int.tryParse(sessionParam);
+        if (sessionId != null && mounted) {
+          await Navigator.push(context, MaterialPageRoute(
+            builder: (_) => RmCalculatorScreen(sessionId: sessionId),
+          ));
+          // Re-start camera after returning from RM screen
+          await _controller.start();
+          setState(() => _processing = false);
+          return;
+        }
+      }
+    } catch (_) { /* not a WOD QR — continue to checkin flow */ }
+    // ── End RM QR detection ────────────────────────────────────────────────
 
     setState(() => _processing = true);
     await _controller.stop();

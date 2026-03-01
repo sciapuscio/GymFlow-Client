@@ -677,6 +677,28 @@ class _QuickActions extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _ActionButton(
+                  label: 'Calculadora RM',
+                  icon: Icons.fitness_center_rounded,
+                  color: const Color(0xFFFF6B35),
+                  onTap: () => context.go('/rm-calculator'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ActionButton(
+                  label: 'Mi progreso RM',
+                  icon: Icons.bar_chart_rounded,
+                  color: const Color(0xFF8B5CF6),
+                  onTap: () => context.go('/rm-history'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
