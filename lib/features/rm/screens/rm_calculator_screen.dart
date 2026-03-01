@@ -1,10 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:provider/provider.dart';
+import '../../../core/api_client.dart';
 import '../../../core/constants.dart';
-import '../../../features/auth/auth_provider.dart';
 import '../models/rm_models.dart';
 import 'rm_history_screen.dart';
 
@@ -30,11 +28,6 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
     _fetchSession();
   }
 
-  Future<String?> _getToken() async {
-    final auth = context.read<AuthProvider>();
-    return auth.token;
-  }
-
   Future<void> _fetchSession() async {
     if (widget.sessionId == null) {
       // Manual mode — start with one blank free-form entry
@@ -51,16 +44,9 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
       });
       return;
     }
-    final token = await _getToken();
-    if (token == null) { setState(() { _loading = false; _error = 'Sin sesión.'; }); return; }
     try {
-      final uri = Uri.parse('${AppConstants.rmCalculatorUrl}?session_id=${widget.sessionId}');
-      final r = await http.get(uri, headers: {'Authorization': 'Bearer $token'});
-      final body = json.decode(r.body) as Map<String, dynamic>;
-      if (r.statusCode != 200) {
-        setState(() { _loading = false; _error = body['error'] ?? 'Error'; });
-        return;
-      }
+      final body = await ApiClient.get(
+          '${AppConstants.rmCalculatorUrl}?session_id=${widget.sessionId}');
       final exList = (body['exercises'] as List? ?? [])
           .map((e) => RmExercise.fromJson(e as Map<String, dynamic>))
           .toList();
@@ -69,53 +55,60 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
         _sessionName = body['session_name'] as String? ?? '';
         _entries = exList.map((ex) => RmEntry(exercise: ex, reps: ex.reps)).toList();
       });
+    } on ApiException catch (e) {
+      setState(() { _loading = false; _error = e.message; });
     } catch (e) {
       setState(() { _loading = false; _error = 'Error de red: $e'; });
     }
   }
 
   Future<void> _save() async {
-    final validEntries = _entries.where((e) => e.weightKg > 0 && e.reps > 0 && e.reps < 37).toList();
+    final validEntries = _entries
+        .where((e) => e.exercise.name.isNotEmpty && e.weightKg > 0 && e.reps > 0 && e.reps < 37)
+        .toList();
     if (validEntries.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ingresá al menos un peso para guardar.')),
+        const SnackBar(content: Text('Ingresá ejercicio y peso para guardar.')),
       );
       return;
     }
     setState(() => _saving = true);
-    final token = await _getToken();
     try {
-      final r = await http.post(
-        Uri.parse(AppConstants.rmCalculatorUrl),
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-        body: json.encode({
-          'session_id': widget.sessionId,
-          'entries': validEntries.map((e) => e.toJson()).toList(),
-        }),
-      );
-      if (r.statusCode == 201) {
-        setState(() { _saving = false; _saved = true; });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ ${validEntries.length} ejercicio${validEntries.length > 1 ? 's' : ''} guardado${validEntries.length > 1 ? 's' : ''}'),
-              backgroundColor: const Color(0xFF00F5D4),
-            ),
-          );
-        }
-      } else {
-        final err = json.decode(r.body)['error'] ?? 'Error al guardar';
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
-        setState(() => _saving = false);
+      await ApiClient.post(AppConstants.rmCalculatorUrl, {
+        if (widget.sessionId != null) 'session_id': widget.sessionId,
+        'entries': validEntries.map((e) => e.toJson()).toList(),
+      });
+      setState(() { _saving = false; _saved = true; });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ ${validEntries.length} ejercicio${validEntries.length > 1 ? 's' : ''} guardado${validEntries.length > 1 ? 's' : ''}'),
+            backgroundColor: const Color(0xFF00F5D4),
+          ),
+        );
       }
+    } on ApiException catch (e) {
+      setState(() => _saving = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       setState(() => _saving = false);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
+  void _addManualEntry() {
+    setState(() {
+      _entries.add(RmEntry(
+        exercise: const RmExercise(
+            name: '', reps: 5, blockName: 'Manual', blockType: 'manual'),
+        reps: 5,
+      ));
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isManual = widget.sessionId == null;
     return Scaffold(
       backgroundColor: const Color(0xFF080810),
       appBar: AppBar(
@@ -124,28 +117,40 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Calculadora RM', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            const Text('Calculadora RM',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             if (_sessionName.isNotEmpty)
-              Text(_sessionName, style: const TextStyle(fontSize: 12, color: Color(0xFF888888))),
+              Text(_sessionName,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF888888))),
           ],
         ),
         actions: [
+          if (isManual)
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline, color: Color(0xFF00F5D4)),
+              tooltip: 'Agregar ejercicio',
+              onPressed: _addManualEntry,
+            ),
           IconButton(
             icon: const Icon(Icons.bar_chart_rounded, color: Color(0xFF00F5D4)),
             tooltip: 'Mi historial',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => const RmHistoryScreen(),
-            )),
+            onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const RmHistoryScreen())),
           ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF00F5D4)))
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Color(0xFFEF4444))))
+              ? Center(
+                  child: Text(_error!,
+                      style: const TextStyle(color: Color(0xFFEF4444))))
               : _entries.isEmpty
-                  ? const Center(child: Text('No hay ejercicios con reps en esta sesión.',
-                      style: TextStyle(color: Color(0xFF888888))))
+                  ? const Center(
+                      child: Text(
+                          'No hay ejercicios con reps en esta sesión.',
+                          style: TextStyle(color: Color(0xFF888888))))
                   : Column(
                       children: [
                         Expanded(
@@ -155,11 +160,13 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
                             separatorBuilder: (_, __) => const SizedBox(height: 12),
                             itemBuilder: (_, i) => _ExerciseCard(
                               entry: _entries[i],
+                              isManual: isManual,
                               onChanged: () => setState(() {}),
                             ),
                           ),
                         ),
-                        _SaveButton(saving: _saving, saved: _saved, onPressed: _save),
+                        _SaveButton(
+                            saving: _saving, saved: _saved, onPressed: _save),
                       ],
                     ),
     );
@@ -169,26 +176,37 @@ class _RmCalculatorScreenState extends State<RmCalculatorScreen> {
 // ────────────────────────────────────────────────────────────────────────────
 class _ExerciseCard extends StatefulWidget {
   final RmEntry entry;
+  final bool isManual;
   final VoidCallback onChanged;
-  const _ExerciseCard({required this.entry, required this.onChanged});
+  const _ExerciseCard(
+      {required this.entry,
+      required this.isManual,
+      required this.onChanged});
 
   @override
   State<_ExerciseCard> createState() => _ExerciseCardState();
 }
 
 class _ExerciseCardState extends State<_ExerciseCard> {
+  late final TextEditingController _nameCtrl;
   late final TextEditingController _kgCtrl;
   late final TextEditingController _repsCtrl;
 
   @override
   void initState() {
     super.initState();
-    _kgCtrl   = TextEditingController(text: widget.entry.weightKg > 0 ? widget.entry.weightKg.toStringAsFixed(1) : '');
-    _repsCtrl = TextEditingController(text: widget.entry.reps.toString());
+    _nameCtrl = TextEditingController(text: widget.entry.exercise.name);
+    _kgCtrl = TextEditingController(
+        text: widget.entry.weightKg > 0
+            ? widget.entry.weightKg.toStringAsFixed(1)
+            : '');
+    _repsCtrl =
+        TextEditingController(text: widget.entry.reps.toString());
   }
 
   @override
   void dispose() {
+    _nameCtrl.dispose();
     _kgCtrl.dispose();
     _repsCtrl.dispose();
     super.dispose();
@@ -209,31 +227,69 @@ class _ExerciseCardState extends State<_ExerciseCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Block badge + exercise name
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00F5D4).withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  widget.entry.exercise.blockName.isNotEmpty
-                      ? widget.entry.exercise.blockName
-                      : widget.entry.exercise.blockType.toUpperCase(),
-                  style: const TextStyle(fontSize: 10, color: Color(0xFF00F5D4), fontWeight: FontWeight.w700),
-                ),
+          // Exercise name — editable in manual mode, label in WOD mode
+          if (widget.isManual)
+            TextField(
+              controller: _nameCtrl,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700),
+              decoration: InputDecoration(
+                hintText: 'Nombre del ejercicio',
+                hintStyle: const TextStyle(color: Color(0xFF444444)),
+                filled: true,
+                fillColor: const Color(0xFF1E1E2E),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF333344))),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF333344))),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF00F5D4))),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(widget.entry.exercise.name,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+              onChanged: (v) {
+                (widget.entry.exercise as dynamic); // can't mutate const
+                // Rebuild entry with new name via a workaround
+                widget.entry.overrideName(v);
+                widget.onChanged();
+              },
+            )
+          else ...[
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00F5D4).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                widget.entry.exercise.blockName.isNotEmpty
+                    ? widget.entry.exercise.blockName
+                    : widget.entry.exercise.blockType.toUpperCase(),
+                style: const TextStyle(
+                    fontSize: 10,
+                    color: Color(0xFF00F5D4),
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(widget.entry.exercise.name,
+                style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white)),
+          ],
           const SizedBox(height: 12),
           Row(
             children: [
-              // Weight input
               Expanded(
                 child: _Field(
                   controller: _kgCtrl,
@@ -248,7 +304,6 @@ class _ExerciseCardState extends State<_ExerciseCard> {
                 ),
               ),
               const SizedBox(width: 12),
-              // Reps input
               Expanded(
                 child: _Field(
                   controller: _repsCtrl,
@@ -257,7 +312,8 @@ class _ExerciseCardState extends State<_ExerciseCard> {
                   suffix: 'reps',
                   isInt: true,
                   onChanged: (v) {
-                    widget.entry.reps = int.tryParse(v) ?? widget.entry.exercise.reps;
+                    widget.entry.reps =
+                        int.tryParse(v) ?? widget.entry.exercise.reps;
                     widget.onChanged();
                     setState(() {});
                   },
@@ -268,7 +324,8 @@ class _ExerciseCardState extends State<_ExerciseCard> {
           if (hasRm) ...[
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: const Color(0xFF00F5D4).withOpacity(0.08),
                 borderRadius: BorderRadius.circular(8),
@@ -277,10 +334,13 @@ class _ExerciseCardState extends State<_ExerciseCard> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('RM estimado (Brzycki)',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF888888))),
+                      style: TextStyle(
+                          fontSize: 12, color: Color(0xFF888888))),
                   Text('${rm.toStringAsFixed(1)} kg',
                       style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF00F5D4))),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF00F5D4))),
                 ],
               ),
             ),
@@ -316,14 +376,17 @@ class _Field extends StatelessWidget {
       inputFormatters: [
         if (isInt) FilteringTextInputFormatter.digitsOnly,
       ],
-      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+      style: const TextStyle(
+          color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         suffixText: suffix,
-        labelStyle: const TextStyle(color: Color(0xFF888888), fontSize: 12),
+        labelStyle:
+            const TextStyle(color: Color(0xFF888888), fontSize: 12),
         hintStyle: const TextStyle(color: Color(0xFF444444)),
-        suffixStyle: const TextStyle(color: Color(0xFF888888), fontSize: 12),
+        suffixStyle:
+            const TextStyle(color: Color(0xFF888888), fontSize: 12),
         filled: true,
         fillColor: const Color(0xFF1E1E2E),
         border: OutlineInputBorder(
@@ -338,7 +401,8 @@ class _Field extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: Color(0xFF00F5D4)),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       ),
       onChanged: onChanged,
     );
@@ -348,27 +412,35 @@ class _Field extends StatelessWidget {
 class _SaveButton extends StatelessWidget {
   final bool saving, saved;
   final VoidCallback onPressed;
-  const _SaveButton({required this.saving, required this.saved, required this.onPressed});
+  const _SaveButton(
+      {required this.saving, required this.saved, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).padding.bottom + 16),
+      padding: EdgeInsets.fromLTRB(
+          16, 0, 16, MediaQuery.of(context).padding.bottom + 16),
       child: SizedBox(
         width: double.infinity,
         height: 52,
         child: ElevatedButton(
           onPressed: saving ? null : onPressed,
           style: ElevatedButton.styleFrom(
-            backgroundColor: saved ? const Color(0xFF10B981) : const Color(0xFF00F5D4),
+            backgroundColor:
+                saved ? const Color(0xFF10B981) : const Color(0xFF00F5D4),
             foregroundColor: const Color(0xFF080810),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
           ),
           child: saving
-              ? const SizedBox(height: 20, width: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF080810)))
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Color(0xFF080810)))
               : Text(saved ? '✅ Guardado' : 'Guardar sesión',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 16)),
         ),
       ),
     );

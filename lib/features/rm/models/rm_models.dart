@@ -1,12 +1,12 @@
 /// RM Calculator — exercise entry model
 class RmExercise {
   final int? id;
-  final String name;
+  String name;      // mutable so manual mode can rename
   final int reps;
   final String blockName;
   final String blockType;
 
-  const RmExercise({
+  RmExercise({
     this.id,
     required this.name,
     required this.reps,
@@ -55,6 +55,9 @@ class RmEntry {
   int reps;
 
   RmEntry({required this.exercise, this.weightKg = 0, required this.reps});
+
+  /// Allows manual mode to rename the exercise.
+  void overrideName(String name) => exercise.name = name;
 
   /// Brzycki RM estimate: weight x (36 / (37 - reps))
   double get rmEstimated {
