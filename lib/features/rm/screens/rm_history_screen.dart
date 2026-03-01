@@ -268,7 +268,7 @@ class _SimpleBarChart extends StatelessWidget {
           final pct = maxRm > 0 ? log.rmEstimated / maxRm : 0.0;
           return Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
+              padding: const EdgeInsets.only(left: 2, right: 2, bottom: 4),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -277,7 +277,7 @@ class _SimpleBarChart extends StatelessWidget {
                           fontSize: 8, color: Color(0xFF888888))),
                   const SizedBox(height: 2),
                   Container(
-                    height: (100 * pct).clamp(4, 100).toDouble(),
+                    height: (92 * pct).clamp(4, 92).toDouble(),
                     decoration: BoxDecoration(
                       color: const Color(0xFF00F5D4),
                       borderRadius: BorderRadius.circular(3),
