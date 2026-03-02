@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../core/api_client.dart';
+import '../../core/app_version_service.dart';
 import '../../core/constants.dart';
 import '../../core/notification_service.dart';
 import '../../core/token_storage.dart';
@@ -38,6 +39,16 @@ class AuthProvider extends ChangeNotifier {
   /// Ruta local del archivo de imagen — disponible sin red para el splash
   String? get gymLogoFilePath => _cachedLogoFilePath;
 
+  // ── Force update ──────────────────────────────────────────────────────────
+  bool _updateRequired = false;
+  bool get updateRequired => _updateRequired;
+  String _currentVersion = '?';
+  String get currentVersion => _currentVersion;
+  String _minVersion = '?';
+  String get minVersion => _minVersion;
+  String? _storeUrl;
+  String? get storeUrl => _storeUrl;
+
   /// Called by the SplashScreen as a last resort if init() is hanging.
   void forceTimeout() {
     debugPrint('=== forceTimeout: status was $_status');
@@ -66,14 +77,30 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _doInit() async {
-    // ── Restore environment FIRST (dev vs prod) ───────────────────────────
+    // ── 0. Restore environment FIRST — version check needs the correct baseUrl ─
     final savedEnv = await TokenStorage.readEnvironment();
-    // null = env was never saved (session pre-dates this feature).
-    // Default to dev to match the old hardcoded baseUrl behavior so existing
-    // sessions are not invalidated.
+    // null = env was never saved (pre-dates this feature). Default to dev so
+    // existing sessions are not invalidated.
     final isDev = savedEnv ?? true;
     AppConstants.setEnvironment(dev: isDev);
     debugPrint('=== INIT: environment = ${isDev ? "DEV" : "PROD"} (${savedEnv == null ? "legacy default" : "persisted"})');
+
+    // ── 1. Version check (before auth, blocks everything if outdated) ─────────
+    try {
+      final result = await AppVersionService.check();
+      _currentVersion = result.currentVersion;
+      _minVersion     = result.minVersion;
+      _updateRequired = result.updateRequired;
+      _storeUrl       = result.androidUrl;
+      debugPrint('[AppVersion] current=$_currentVersion  min=$_minVersion  blocked=$_updateRequired');
+      if (result.updateRequired) {
+        // Unblock splash so the router can redirect to /force-update
+        _splashReady = true;
+        return;
+      }
+    } catch (e) {
+      debugPrint('[AppVersion] check error (ignored, fail-open): $e');
+    }
 
     // Load cached gym logo FIRST and notify so the splash rebuilds with it
     _cachedLogoUrl = await TokenStorage.readGymLogoUrl();

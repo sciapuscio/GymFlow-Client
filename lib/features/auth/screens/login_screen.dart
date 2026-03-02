@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../auth_provider.dart';
 import '../../../core/constants.dart';
 import '../../../core/token_storage.dart';
@@ -258,6 +259,31 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(height: 8),
+
+                    // ── Términos y condiciones ────────────────────────────
+                    Center(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final uri = Uri.parse(
+                            'https://sistema.gymflow.com.ar/web/terminos.html',
+                          );
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          }
+                        },
+                        child: const Text(
+                          'Términos y Condiciones',
+                          style: TextStyle(
+                            color: Color(0xFF555566),
+                            fontSize: 12,
+                            decoration: TextDecoration.underline,
+                            decorationColor: Color(0xFF555566),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),

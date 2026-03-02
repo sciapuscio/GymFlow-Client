@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'core/connectivity_service.dart';
 import 'features/auth/auth_provider.dart';
+import 'features/auth/screens/force_update_screen.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'features/auth/screens/register_screen.dart';
 import 'features/auth/screens/splash_screen.dart';
@@ -27,6 +28,12 @@ GoRouter buildRouter(AuthProvider auth) {
     initialLocation: '/home',
     redirect: (context, state) {
       final status = auth.status;
+      final loc    = state.matchedLocation;
+
+      // ── Force update check (highest priority) ───────────────────────────
+      if (auth.updateRequired && loc != '/force-update') return '/force-update';
+      // Never redirect away from force-update if update is still required
+      if (loc == '/force-update' && !auth.updateRequired) return '/splash';
 
       // Still initializing → stay on splash
       if (status == AuthStatus.unknown) return '/splash';
@@ -35,7 +42,6 @@ GoRouter buildRouter(AuthProvider auth) {
       if (!auth.splashReady && state.matchedLocation == '/splash') return '/splash';
 
       final isAuth = status == AuthStatus.authenticated;
-      final loc = state.matchedLocation;
 
       // Splash must always redirect once auth is resolved AND splash is ready
       if (loc == '/splash') return isAuth ? '/home' : '/login';
@@ -56,6 +62,18 @@ GoRouter buildRouter(AuthProvider auth) {
       GoRoute(
         path: '/splash',
         builder: (_, __) => const SplashScreen(),
+      ),
+      // ── Force update (shown before auth check, outside shell) ─────────────
+      GoRoute(
+        path: '/force-update',
+        builder: (context, _) {
+          final auth = context.read<AuthProvider>();
+          return ForceUpdateScreen(
+            currentVersion: auth.currentVersion,
+            minVersion: auth.minVersion,
+            storeUrl: auth.storeUrl,
+          );
+        },
       ),
       GoRoute(
         path: '/login',

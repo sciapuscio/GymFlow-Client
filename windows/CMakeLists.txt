@@ -10,6 +10,13 @@ set(BINARY_NAME "gymflowclient")
 # versions of CMake.
 cmake_policy(VERSION 3.14...3.25)
 
+# Workaround: firebase_cpp_sdk uses cmake_minimum_required < 3.5, which CMake >= 4.0
+# rejects. Setting this policy minimum allows the legacy SDK to configure correctly.
+if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+
+
 # Define build configuration option.
 get_property(IS_MULTICONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(IS_MULTICONFIG)
