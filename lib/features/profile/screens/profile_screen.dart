@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../../auth/auth_provider.dart';
 import '../../schedule/screens/my_reservations_screen.dart';
@@ -200,10 +201,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    const Center(
-                      child: Text(
-                        'GymFlow v1.0.0',
-                        style: TextStyle(color: Color(0xFF333333), fontSize: 12),
+                    Center(
+                      child: FutureBuilder<PackageInfo>(
+                        future: PackageInfo.fromPlatform(),
+                        builder: (_, snap) {
+                          final v = snap.data?.version ?? '...';
+                          return Text(
+                            'GymFlow v$v',
+                            style: const TextStyle(
+                                color: Color(0xFF333333), fontSize: 12),
+                          );
+                        },
                       ),
                     ),
                   ],
