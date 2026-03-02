@@ -30,10 +30,14 @@ GoRouter buildRouter(AuthProvider auth) {
       final status = auth.status;
       final loc    = state.matchedLocation;
 
-      // ── Force update check (highest priority) ───────────────────────────
-      if (auth.updateRequired && loc != '/force-update') return '/force-update';
-      // Never redirect away from force-update if update is still required
-      if (loc == '/force-update' && !auth.updateRequired) return '/splash';
+      // ── Force update (highest priority) ─────────────────────────────────
+      // If update is required, always stay on /force-update.
+      // Using an early return null prevents falling through to the
+      // `status == unknown` check which would cause an infinite loop.
+      if (auth.updateRequired) {
+        return loc == '/force-update' ? null : '/force-update';
+      }
+      if (loc == '/force-update') return '/splash'; // update no longer required
 
       // Still initializing → stay on splash
       if (status == AuthStatus.unknown) return '/splash';
