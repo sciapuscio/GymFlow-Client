@@ -7,7 +7,10 @@ import '../../../core/constants.dart';
 import '../../../core/token_storage.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  /// When true, the user is adding a second gym account without
+  /// logging out of the current one. On success, pops back to profile.
+  final bool addingAccount;
+  const LoginScreen({super.key, this.addingAccount = false});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -78,7 +81,11 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
       auth.clearError();
+    } else if (ok && mounted && widget.addingAccount) {
+      // Adding account mode: go back to profile, don't push to home
+      Navigator.of(context).pop();
     }
+    // Normal login → router handles navigation automatically via auth state
   }
 
   @override

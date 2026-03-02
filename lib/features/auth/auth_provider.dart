@@ -5,6 +5,7 @@ import '../../core/api_client.dart';
 import '../../core/app_version_service.dart';
 import '../../core/constants.dart';
 import '../../core/notification_service.dart';
+import '../../core/saved_account.dart';
 import '../../core/token_storage.dart';
 import '../../models/member.dart';
 import 'auth_repository.dart';
@@ -38,6 +39,40 @@ class AuthProvider extends ChangeNotifier {
   String? get gymLogoUrl => _member?.gym?.logoPath ?? _cachedLogoUrl;
   /// Ruta local del archivo de imagen — disponible sin red para el splash
   String? get gymLogoFilePath => _cachedLogoFilePath;
+
+  // ── Multi-account ─────────────────────────────────────────────────────────
+  List<SavedAccount> _savedAccounts = [];
+  List<SavedAccount> get savedAccounts => List.unmodifiable(_savedAccounts);
+
+  Future<void> _loadSavedAccounts() async {
+    _savedAccounts = await TokenStorage.readAccounts();
+  }
+
+  /// Switches the active account. Restores env, token, logo and refreshes member data.
+  Future<void> switchAccount(SavedAccount account) async {
+    _loading = true;
+    notifyListeners();
+    // Persist the new active token
+    await TokenStorage.setActiveAccount(account.token);
+    // Restore environment
+    final isDev = account.env == 'dev';
+    AppConstants.setEnvironment(dev: isDev);
+    await TokenStorage.writeEnvironment(isDev);
+    // Update in-memory state
+    _token = account.token;
+    _cachedLogoUrl = account.gymLogoUrl;
+    _cachedLogoFilePath = null;
+    await TokenStorage.writeGymLogoUrl(account.gymLogoUrl);
+    if (account.gymLogoUrl != null) {
+      _cachedLogoFilePath = await TokenStorage.cacheGymLogoBytes(account.gymLogoUrl!);
+    }
+    _status = AuthStatus.authenticated;
+    _savedAccounts = await TokenStorage.readAccounts();
+    _loading = false;
+    notifyListeners();
+    // Refresh member data in background
+    refresh();
+  }
 
   // ── Force update ──────────────────────────────────────────────────────────
   bool _updateRequired = false;
@@ -77,6 +112,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _doInit() async {
+    await _loadSavedAccounts();
     // ── 0. Restore environment FIRST — version check needs the correct baseUrl ─
     final savedEnv = await TokenStorage.readEnvironment();
     // null = env was never saved (pre-dates this feature). Default to dev so
@@ -161,6 +197,18 @@ class AuthProvider extends ChangeNotifier {
       if (logoUrl != null) {
         _cachedLogoFilePath = await TokenStorage.cacheGymLogoBytes(logoUrl);
       }
+      // ── Save account to multi-account list ──────────────────────────────
+      final currentEnv = AppConstants.isDev ? 'dev' : 'prod';
+      await TokenStorage.addOrUpdateAccount(SavedAccount(
+        token: _token!,
+        memberName: _member?.name ?? '',
+        gymName: _member?.gym?.name ?? gymSlug,
+        gymSlug: gymSlug,
+        gymLogoUrl: logoUrl,
+        env: currentEnv,
+        isActive: true,
+      ));
+      _savedAccounts = await TokenStorage.readAccounts();
       notifyListeners();
       // Register FCM token with backend (fire-and-forget)
       _registerFcmToken();
@@ -261,13 +309,27 @@ class AuthProvider extends ChangeNotifier {
 
   // ── Logout ───────────────────────────────────────────────────────────────────
   Future<void> logout() async {
+    final currentToken = _token;
     await AuthRepository.logout();
+    // Remove this account from the saved list
+    if (currentToken != null) {
+      await TokenStorage.removeAccount(currentToken);
+    }
+    _savedAccounts = await TokenStorage.readAccounts();
+    // If there are other saved accounts, switch to the first one instead of fully logging out
+    if (_savedAccounts.isNotEmpty) {
+      await switchAccount(_savedAccounts.first);
+      return;
+    }
+    // Full logout — no other accounts
     _member = null;
+    _token = null;
     _cachedLogoUrl = null;
     _cachedLogoFilePath = null;
     await TokenStorage.writeGymLogoUrl(null);
     await TokenStorage.deleteGymLogoBytes();
-    await TokenStorage.deleteEnvironment(); // reset to production on logout
+    await TokenStorage.delete();
+    await TokenStorage.deleteEnvironment();
     AppConstants.setEnvironment(dev: false);
     _status = AuthStatus.unauthenticated;
     notifyListeners();

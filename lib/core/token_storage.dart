@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'saved_account.dart';
 
 /// Cross-platform token storage.
 /// Uses shared_preferences for all platforms (simple key-value store).
@@ -9,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// by adding it back to pubspec.yaml and restoring the platform-specific logic.
 class TokenStorage {
   static const _key = 'gf_member_token';
+  static const _accountsKey = 'gf_accounts'; // multi-account list (JSON)
 
   static Future<void> write(String token) async {
     final prefs = await SharedPreferences.getInstance();
@@ -103,5 +105,70 @@ class TokenStorage {
   static Future<void> deleteEnvironment() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_envKey);
+  }
+
+  // ── Multi-account support ─────────────────────────────────────────────────
+
+  /// Returns all saved gym accounts.
+  static Future<List<SavedAccount>> readAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_accountsKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      return SavedAccount.listFromJson(raw);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Persists the full accounts list.
+  static Future<void> writeAccounts(List<SavedAccount> accounts) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_accountsKey, SavedAccount.listToJson(accounts));
+  }
+
+  /// Upserts an account by token. If the token already exists, updates it;
+  /// otherwise appends it. Marks it as active if [isActive] is true.
+  static Future<void> addOrUpdateAccount(SavedAccount account) async {
+    final accounts = await readAccounts();
+    final idx = accounts.indexWhere((a) => a.token == account.token);
+    if (idx >= 0) {
+      accounts[idx] = account;
+    } else {
+      accounts.add(account);
+    }
+    // If this is active, deactivate others
+    if (account.isActive) {
+      final updated = accounts.map((a) {
+        return a.token == account.token ? a : a.copyWith(isActive: false);
+      }).toList();
+      await writeAccounts(updated);
+      await write(account.token); // keep gf_member_token in sync
+    } else {
+      await writeAccounts(accounts);
+    }
+  }
+
+  /// Removes an account by token.
+  static Future<void> removeAccount(String token) async {
+    final accounts = await readAccounts();
+    accounts.removeWhere((a) => a.token == token);
+    await writeAccounts(accounts);
+  }
+
+  /// Marks an account as active, deactivates all others, syncs gf_member_token.
+  static Future<SavedAccount?> setActiveAccount(String token) async {
+    final accounts = await readAccounts();
+    SavedAccount? active;
+    final updated = accounts.map((a) {
+      if (a.token == token) {
+        active = a.copyWith(isActive: true);
+        return active!;
+      }
+      return a.copyWith(isActive: false);
+    }).toList();
+    await writeAccounts(updated);
+    if (active != null) await write(token);
+    return active;
   }
 }

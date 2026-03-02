@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../../auth/auth_provider.dart';
+import '../../auth/screens/login_screen.dart';
 import '../../schedule/screens/my_reservations_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -13,16 +14,19 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  Future<void> _logout() async {
+  Future<void> _logout(BuildContext context, AuthProvider auth) async {
+    final hasOtherAccounts = auth.savedAccounts.where((a) => !a.isActive).isNotEmpty;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF14141E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text('Cerrar sesión', style: TextStyle(color: Color(0xFFF0F0F0))),
-        content: const Text(
-          '¿Seguro que querés cerrar sesión?',
-          style: TextStyle(color: Color(0xFF888888)),
+        content: Text(
+          hasOtherAccounts
+              ? '¿Cerrar sesión de este gimnasio? Se activará tu otra cuenta automáticamente.'
+              : '¿Seguro que querés cerrar sesión?',
+          style: const TextStyle(color: Color(0xFF888888)),
         ),
         actions: [
           TextButton(
@@ -43,7 +47,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final member = context.watch<AuthProvider>().member;
+    final auth = context.watch<AuthProvider>();
+    final member = auth.member;
     final ms = member?.membership;
 
     return Scaffold(
@@ -188,11 +193,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ]),
                     const SizedBox(height: 32),
 
-                    // ── Logout ────────────────────────────────────────────────
+                    // ── MIS GIMNASIOS ─────────────────────────────
+                    if (auth.savedAccounts.length > 1 || true) ...[
+                      const Text(
+                        'MIS GIMNASIOS',
+                        style: TextStyle(fontSize: 11, letterSpacing: 1.5, color: Color(0xFF666666), fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 10),
+                      _InfoCard(children: [
+                        ...auth.savedAccounts.map((acc) => _GymAccountRow(
+                          account: acc,
+                          onSwitch: acc.isActive ? null : () => auth.switchAccount(acc),
+                        )),
+                        // Add another gym button
+                        GestureDetector(
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const LoginScreen(addingAccount: true),
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32, height: 32,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF00F5D4).withOpacity(0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.add, size: 16, color: Color(0xFF00F5D4)),
+                                ),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  'Agregar otro gimnasio',
+                                  style: TextStyle(color: Color(0xFF00F5D4), fontSize: 13, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 24),
+                    ],
+
+                    // ── Logout ───────────────────────────────────────
                     OutlinedButton.icon(
-                      onPressed: _logout,
+                      onPressed: () => _logout(context, auth),
                       icon: const Icon(Icons.logout_rounded, size: 18),
-                      label: const Text('Cerrar sesión'),
+                      label: Text(auth.savedAccounts.where((a) => !a.isActive).isNotEmpty
+                          ? 'Cerrar esta sesión'
+                          : 'Cerrar sesión'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFFEF4444),
                         side: BorderSide(color: const Color(0xFFEF4444).withOpacity(0.4)),
@@ -268,4 +320,101 @@ class _InfoRow extends StatelessWidget {
       ],
     ),
   );
+}
+
+// ── Gym account row for multi-account switcher ─────────────────────────────
+class _GymAccountRow extends StatelessWidget {
+  final dynamic account; // SavedAccount
+  final VoidCallback? onSwitch;
+  const _GymAccountRow({required this.account, this.onSwitch});
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = account.isActive as bool;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          // Gym icon
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: isActive
+                  ? const Color(0xFF00F5D4).withOpacity(0.12)
+                  : const Color(0xFF242430),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(
+              child: Text(
+                account.gymName.isNotEmpty ? account.gymName[0].toUpperCase() : '?',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: isActive ? const Color(0xFF00F5D4) : const Color(0xFF888888),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Gym name + member name
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  account.gymName as String,
+                  style: TextStyle(
+                    color: isActive ? Colors.white : const Color(0xFFAAAAAA),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  account.memberName as String,
+                  style: const TextStyle(color: Color(0xFF666666), fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          // Badge or switch button
+          if (isActive)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00F5D4).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text(
+                'ACTIVO',
+                style: TextStyle(
+                  color: Color(0xFF00F5D4),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            )
+          else
+            GestureDetector(
+              onTap: onSwitch,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E30),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF333345)),
+                ),
+                child: const Text(
+                  'Cambiar',
+                  style: TextStyle(color: Color(0xFFCCCCCC), fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
