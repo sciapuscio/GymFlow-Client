@@ -263,22 +263,35 @@ class _LoginScreenState extends State<LoginScreen> {
 
                     // ── Términos y condiciones ────────────────────────────
                     Center(
-                      child: GestureDetector(
+                      child: InkWell(
                         onTap: () async {
                           final uri = Uri.parse(
                             'https://sistema.gymflow.com.ar/web/terminos.html',
                           );
-                          if (await canLaunchUrl(uri)) {
-                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          try {
+                            await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            );
+                          } catch (_) {
+                            // fallback: plataformas sin browser nativo
+                            await launchUrl(
+                              uri,
+                              mode: LaunchMode.inAppBrowserView,
+                            );
                           }
                         },
-                        child: const Text(
-                          'Términos y Condiciones',
-                          style: TextStyle(
-                            color: Color(0xFF555566),
-                            fontSize: 12,
-                            decoration: TextDecoration.underline,
-                            decorationColor: Color(0xFF555566),
+                        borderRadius: BorderRadius.circular(4),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: Text(
+                            'Términos y Condiciones',
+                            style: TextStyle(
+                              color: Color(0xFF555566),
+                              fontSize: 12,
+                              decoration: TextDecoration.underline,
+                              decorationColor: Color(0xFF555566),
+                            ),
                           ),
                         ),
                       ),
