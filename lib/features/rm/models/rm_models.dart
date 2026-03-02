@@ -72,3 +72,51 @@ class RmEntry {
         'reps': reps,
       };
 }
+
+// ── WOD History models ────────────────────────────────────────────────────────
+
+/// A single RM entry inside a WOD history record.
+class WodRmEntry {
+  final String exerciseName;
+  final double weightKg;
+  final int reps;
+  final double rmEstimated;
+
+  const WodRmEntry({
+    required this.exerciseName,
+    required this.weightKg,
+    required this.reps,
+    required this.rmEstimated,
+  });
+
+  factory WodRmEntry.fromJson(Map<String, dynamic> j) => WodRmEntry(
+        exerciseName: j['exercise_name'] as String,
+        weightKg: double.parse(j['weight_kg'].toString()),
+        reps: (j['reps'] as num).toInt(),
+        rmEstimated: double.parse(j['rm_estimated'].toString()),
+      );
+}
+
+/// A WOD session with all its RM entries.
+class WodHistoryEntry {
+  final int? sessionId;
+  final String sessionName;
+  final String sessionDate; // 'YYYY-MM-DD'
+  final List<WodRmEntry> entries;
+
+  const WodHistoryEntry({
+    required this.sessionId,
+    required this.sessionName,
+    required this.sessionDate,
+    required this.entries,
+  });
+
+  factory WodHistoryEntry.fromJson(Map<String, dynamic> j) => WodHistoryEntry(
+        sessionId: j['session_id'] as int?,
+        sessionName: j['session_name'] as String,
+        sessionDate: j['session_date'] as String,
+        entries: (j['entries'] as List)
+            .map((e) => WodRmEntry.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}

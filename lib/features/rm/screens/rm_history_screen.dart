@@ -11,24 +11,46 @@ class RmHistoryScreen extends StatefulWidget {
   State<RmHistoryScreen> createState() => _RmHistoryScreenState();
 }
 
-class _RmHistoryScreenState extends State<RmHistoryScreen> {
+class _RmHistoryScreenState extends State<RmHistoryScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  // ── Tab 0: Exercises ────────────────────────────────────────────────────────
   List<Map<String, dynamic>> _exercises = [];
   String? _selectedExercise;
   List<RmLog> _logs = [];
   double _pr = 0;
   bool _loadingExercises = true;
   bool _loadingLogs = false;
-  String? _error;
+  String? _exerciseError;
+
+  // ── Tab 1: WOD History ──────────────────────────────────────────────────────
+  List<WodHistoryEntry> _wods = [];
+  bool _loadingWods = false;
+  bool _wodsLoaded = false;
+  String? _wodError;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.index == 1 && !_wodsLoaded) _fetchWodHistory();
+    });
     _fetchExercises();
   }
 
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  // ── Exercises tab logic ─────────────────────────────────────────────────────
   Future<void> _fetchExercises() async {
     try {
-      final body = await ApiClient.get('${AppConstants.rmCalculatorUrl}?action=exercises');
+      final body =
+          await ApiClient.get('${AppConstants.rmCalculatorUrl}?action=exercises');
       final list = (body['exercises'] as List? ?? [])
           .cast<Map<String, dynamic>>()
           .toList();
@@ -38,14 +60,23 @@ class _RmHistoryScreenState extends State<RmHistoryScreen> {
       });
       if (widget.exerciseName != null) _fetchHistory(widget.exerciseName!);
     } on ApiException catch (e) {
-      setState(() { _loadingExercises = false; _error = e.message; });
+      setState(() {
+        _loadingExercises = false;
+        _exerciseError = e.message;
+      });
     } catch (e) {
-      setState(() { _loadingExercises = false; _error = '$e'; });
+      setState(() {
+        _loadingExercises = false;
+        _exerciseError = '$e';
+      });
     }
   }
 
   Future<void> _fetchHistory(String name) async {
-    setState(() { _loadingLogs = true; _selectedExercise = name; });
+    setState(() {
+      _loadingLogs = true;
+      _selectedExercise = name;
+    });
     try {
       final body = await ApiClient.get(
           '${AppConstants.rmCalculatorUrl}?action=history&exercise=${Uri.encodeComponent(name)}');
@@ -58,9 +89,42 @@ class _RmHistoryScreenState extends State<RmHistoryScreen> {
         _loadingLogs = false;
       });
     } on ApiException catch (e) {
-      setState(() { _loadingLogs = false; _error = e.message; });
+      setState(() {
+        _loadingLogs = false;
+        _exerciseError = e.message;
+      });
     } catch (e) {
-      setState(() { _loadingLogs = false; });
+      setState(() => _loadingLogs = false);
+    }
+  }
+
+  // ── WOD History tab logic ───────────────────────────────────────────────────
+  Future<void> _fetchWodHistory() async {
+    setState(() {
+      _loadingWods = true;
+      _wodError = null;
+    });
+    try {
+      final body = await ApiClient.get(
+          '${AppConstants.rmCalculatorUrl}?action=wod-history');
+      final list = (body['wods'] as List? ?? [])
+          .map((e) => WodHistoryEntry.fromJson(e as Map<String, dynamic>))
+          .toList();
+      setState(() {
+        _wods = list;
+        _loadingWods = false;
+        _wodsLoaded = true;
+      });
+    } on ApiException catch (e) {
+      setState(() {
+        _loadingWods = false;
+        _wodError = e.message;
+      });
+    } catch (e) {
+      setState(() {
+        _loadingWods = false;
+        _wodError = '$e';
+      });
     }
   }
 
@@ -71,47 +135,123 @@ class _RmHistoryScreenState extends State<RmHistoryScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF14141E),
         foregroundColor: Colors.white,
-        title: Text(
-          _selectedExercise ?? 'Mi Progreso RM',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        title: const Text(
+          'Mi Progreso RM',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: const Color(0xFF00F5D4),
+          labelColor: const Color(0xFF00F5D4),
+          unselectedLabelColor: const Color(0xFF888888),
+          tabs: const [
+            Tab(icon: Icon(Icons.fitness_center, size: 18), text: 'Ejercicios'),
+            Tab(icon: Icon(Icons.calendar_month, size: 18), text: 'WODs'),
+          ],
         ),
       ),
-      body: _loadingExercises
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00F5D4)))
-          : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Color(0xFFEF4444))))
-              : Row(
-                  children: [
-                    SizedBox(
-                      width: 160,
-                      child: _ExerciseList(
-                        exercises: _exercises,
-                        selected: _selectedExercise,
-                        onSelect: _fetchHistory,
-                      ),
-                    ),
-                    const VerticalDivider(width: 1, color: Color(0xFF242430)),
-                    Expanded(
-                      child: _selectedExercise == null
-                          ? const Center(
-                              child: Text('Seleccioná un ejercicio',
-                                  style: TextStyle(color: Color(0xFF888888))))
-                          : _loadingLogs
-                              ? const Center(
-                                  child: CircularProgressIndicator(
-                                      color: Color(0xFF00F5D4)))
-                              : _LogDetail(
-                                  logs: _logs,
-                                  pr: _pr,
-                                  exerciseName: _selectedExercise!),
-                    ),
-                  ],
-                ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildExercisesTab(),
+          _buildWodHistoryTab(),
+        ],
+      ),
+    );
+  }
+
+  // ── Tab 0: Exercises (unchanged) ────────────────────────────────────────────
+  Widget _buildExercisesTab() {
+    if (_loadingExercises) {
+      return const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00F5D4)));
+    }
+    if (_exerciseError != null) {
+      return Center(
+          child: Text(_exerciseError!,
+              style: const TextStyle(color: Color(0xFFEF4444))));
+    }
+    return Row(
+      children: [
+        SizedBox(
+          width: 160,
+          child: _ExerciseList(
+            exercises: _exercises,
+            selected: _selectedExercise,
+            onSelect: _fetchHistory,
+          ),
+        ),
+        const VerticalDivider(width: 1, color: Color(0xFF242430)),
+        Expanded(
+          child: _selectedExercise == null
+              ? const Center(
+                  child: Text('Seleccioná un ejercicio',
+                      style: TextStyle(color: Color(0xFF888888))))
+              : _loadingLogs
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                          color: Color(0xFF00F5D4)))
+                  : _LogDetail(
+                      logs: _logs,
+                      pr: _pr,
+                      exerciseName: _selectedExercise!),
+        ),
+      ],
+    );
+  }
+
+  // ── Tab 1: WOD History ──────────────────────────────────────────────────────
+  Widget _buildWodHistoryTab() {
+    if (_loadingWods) {
+      return const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00F5D4)));
+    }
+    if (_wodError != null) {
+      return Center(
+          child: Text(_wodError!,
+              style: const TextStyle(color: Color(0xFFEF4444))));
+    }
+    if (_wods.isEmpty && _wodsLoaded) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('🏋️', style: TextStyle(fontSize: 48)),
+              SizedBox(height: 12),
+              Text(
+                'Sin WODs registrados aún.',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Escaneá el QR al terminar un WOD\ny cargá tus pesos para verlos acá.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Color(0xFF888888), fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _fetchWodHistory,
+      color: const Color(0xFF00F5D4),
+      backgroundColor: const Color(0xFF14141E),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _wods.length,
+        itemBuilder: (_, i) => _WodCard(wod: _wods[i]),
+      ),
     );
   }
 }
 
-// ── Exercise list panel ───────────────────────────────────────────────────────
+// ── Exercise list panel (unchanged) ──────────────────────────────────────────
 class _ExerciseList extends StatelessWidget {
   final List<Map<String, dynamic>> exercises;
   final String? selected;
@@ -170,7 +310,7 @@ class _ExerciseList extends StatelessWidget {
   }
 }
 
-// ── Log detail with chart ─────────────────────────────────────────────────────
+// ── Log detail with chart (unchanged) ────────────────────────────────────────
 class _LogDetail extends StatelessWidget {
   final List<RmLog> logs;
   final double pr;
@@ -185,7 +325,8 @@ class _LogDetail extends StatelessWidget {
           child: Text('Sin historial para este ejercicio.',
               style: TextStyle(color: Color(0xFF888888))));
     }
-    final maxRm = logs.map((l) => l.rmEstimated).reduce((a, b) => a > b ? a : b);
+    final maxRm =
+        logs.map((l) => l.rmEstimated).reduce((a, b) => a > b ? a : b);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -313,8 +454,7 @@ class _LogRow extends StatelessWidget {
       child: Row(
         children: [
           Text(log.date,
-              style:
-                  const TextStyle(color: Color(0xFF888888), fontSize: 12)),
+              style: const TextStyle(color: Color(0xFF888888), fontSize: 12)),
           const Spacer(),
           Text('${log.weightKg.toStringAsFixed(1)} kg × ${log.reps} reps',
               style: const TextStyle(color: Colors.white, fontSize: 13)),
@@ -324,6 +464,181 @@ class _LogRow extends StatelessWidget {
                   color: Color(0xFF00F5D4),
                   fontSize: 13,
                   fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+// ── WOD History card (NEW) ───────────────────────────────────────────────────
+class _WodCard extends StatefulWidget {
+  final WodHistoryEntry wod;
+  const _WodCard({required this.wod});
+
+  @override
+  State<_WodCard> createState() => _WodCardState();
+}
+
+class _WodCardState extends State<_WodCard> {
+  bool _expanded = false;
+
+  String _formatDate(String raw) {
+    // raw: 'YYYY-MM-DD'
+    if (raw.length < 10) return raw;
+    final parts = raw.split('-');
+    if (parts.length != 3) return raw;
+    const months = [
+      '', 'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+      'jul', 'ago', 'sep', 'oct', 'nov', 'dic'
+    ];
+    final m = int.tryParse(parts[1]) ?? 0;
+    return '${parts[2]} ${m < months.length ? months[m] : parts[1]}. ${parts[0]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final wod = widget.wod;
+    final isManual = wod.sessionId == null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14141E),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isManual
+              ? const Color(0xFF333345)
+              : const Color(0xFF00F5D4).withOpacity(0.18),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          // ── Header ────────────────────────────────────────────────────────
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  // Icon
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: isManual
+                          ? const Color(0xFF242430)
+                          : const Color(0xFF00F5D4).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: Text(
+                        isManual ? '✏️' : '🏋️',
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Name + date
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          wod.sessionName,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _formatDate(wod.sessionDate),
+                          style: const TextStyle(
+                              color: Color(0xFF888888), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Exercise count badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00F5D4).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '${wod.entries.length} ejerc.',
+                      style: const TextStyle(
+                          color: Color(0xFF00F5D4),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: const Color(0xFF555566),
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Entries (expandable) ──────────────────────────────────────────
+          if (_expanded) ...[
+            const Divider(height: 1, color: Color(0xFF242430)),
+            ...wod.entries.map((entry) => _EntryRow(entry: entry)),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _EntryRow extends StatelessWidget {
+  final WodRmEntry entry;
+  const _EntryRow({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              entry.exerciseName,
+              style: const TextStyle(
+                color: Color(0xFFCCCCCC),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Text(
+            '${entry.weightKg.toStringAsFixed(1)} kg × ${entry.reps} reps',
+            style: const TextStyle(color: Color(0xFF888888), fontSize: 12),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '⚡ ${entry.rmEstimated.toStringAsFixed(1)}',
+            style: const TextStyle(
+              color: Color(0xFF00F5D4),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );
